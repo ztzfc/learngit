@@ -9,7 +9,9 @@
 - 图片暂不提供......TODO
 - ClassPathXmlApplicationContext虽然实现了BeanFactory接口，但是自身保留了一个beanFactory属性，用来对bean进行操作。
 - ClassPathXmlApplicationContext持有的beanFactory为ConfigurableListableBeanFactory,因为ConfigurableListableBeanFactory实现了所有的beanfactory相关接口，是功能最强大的beanfactory
-
+- `TODO` 循环依赖
+- `TODO` AOP
+- `TODO` 事物
 #### 主流程
 - ClassPathXmlApplicationContext构造方法
 ```java
@@ -653,9 +655,7 @@ protected Object initializeBean(String beanName, Object bean, @Nullable RootBean
 	return wrappedBean;
 }
 ```
-- `TODO` 循环依赖
-- `TODO` AOP
-- `TODO` 事物
+
 #### 注册bean流程
 - org.springframework.context.support.AbstractApplicationContext.refresh的obtainFreshBeanFactory() -> org.springframework.context.support.AbstractApplicationContext.obtainFreshBeanFactory
 ```java
