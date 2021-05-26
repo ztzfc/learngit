@@ -1,8 +1,11 @@
-#Spring
+# Spring
 
-##IOC主要流程解析
-###以ClassPathXmlApplicationContext为例解析
-####类图
+## IOC主要流程解析
+
+### 以ClassPathXmlApplicationContext为例解析
+
+#### 类图
+
 - 图片暂不提供......TODO
 - ClassPathXmlApplicationContext虽然实现了BeanFactory接口，但是自身保留了一个beanFactory属性，用来对bean进行操作。
 - ClassPathXmlApplicationContext持有的beanFactory为ConfigurableListableBeanFactory,因为ConfigurableListableBeanFactory实现了所有的beanfactory相关接口，是功能最强大的beanfactory
