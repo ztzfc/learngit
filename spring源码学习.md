@@ -9,7 +9,6 @@
 - 图片暂不提供......TODO
 - ClassPathXmlApplicationContext虽然实现了BeanFactory接口，但是自身保留了一个beanFactory属性，用来对bean进行操作。
 - ClassPathXmlApplicationContext持有的beanFactory为ConfigurableListableBeanFactory,因为ConfigurableListableBeanFactory实现了所有的beanfactory相关接口，是功能最强大的beanfactory
-- `TODO` 循环依赖
 - `TODO` AOP
 - `TODO` 事物
 #### 主流程
@@ -1085,3 +1084,158 @@ public void registerBeanDefinition(String beanName, BeanDefinition beanDefinitio
 }
 ```
 - 就是把beanname->BeanDefinition 放到一个map中beanDefinitionMap
+
+## 循环依赖
+### 代码分析
+- 创建bean
+```java
+protected Object doCreateBean(String beanName, RootBeanDefinition mbd, @Nullable Object[] args)
+		throws BeanCreationException {
+
+	// Instantiate the bean.
+	BeanWrapper instanceWrapper = null;
+	if (mbd.isSingleton()) {
+		instanceWrapper = this.factoryBeanInstanceCache.remove(beanName);
+	}
+	if (instanceWrapper == null) {
+		instanceWrapper = createBeanInstance(beanName, mbd, args);
+	}
+    // 创建bean
+	Object bean = instanceWrapper.getWrappedInstance();
+
+        ......
+
+	// Eagerly cache singletons to be able to resolve circular references
+	// even when triggered by lifecycle interfaces like BeanFactoryAware.
+	// 下面这块代码是为了解决循环依赖的问题，以后有时间，我再对循环依赖这个问题进行解析吧 【TODO】
+	boolean earlySingletonExposure = (mbd.isSingleton() && this.allowCircularReferences &&
+			isSingletonCurrentlyInCreation(beanName));
+	if (earlySingletonExposure) {
+		if (logger.isTraceEnabled()) {
+			logger.trace("Eagerly caching bean '" + beanName +
+					"' to allow for resolving potential circular references");
+		}
+    // 将bean包装为ObjectFactory放入三级缓存
+		addSingletonFactory(beanName, () -> getEarlyBeanReference(beanName, mbd, bean));
+	}
+
+	// Initialize the bean instance.
+	Object exposedObject = bean;
+	try {
+		// 属性装配，如果属性为对象类型，需要通过getBean方法获取bean
+		populateBean(beanName, mbd, instanceWrapper);
+	}
+......
+}
+```
+- 获取bean
+```java
+protected <T> T doGetBean(
+		String name, @Nullable Class<T> requiredType, @Nullable Object[] args, boolean typeCheckOnly)
+		throws BeansException {
+
+	String beanName = transformedBeanName(name);
+	Object bean;
+	// Eagerly check singleton cache for manually registered singletons.
+	// 从缓存中获取bean，在这里会将bean从三级缓存挪到二级缓存
+	Object sharedInstance = getSingleton(beanName);
+        ........
+			// Create bean instance.
+			if (mbd.isSingleton()) {
+                // 这个方法执行之后会将bean放入一级缓存
+				sharedInstance = getSingleton(beanName, () -> {
+					try {
+						return createBean(beanName, mbd, args);
+					}
+					catch (BeansException ex) {
+						// Explicitly remove instance from singleton cache: It might have been put there
+						// eagerly by the creation process, to allow for circular reference resolution.
+						// Also remove any beans that received a temporary reference to the bean.
+						destroySingleton(beanName);
+						throw ex;
+					}
+				});
+				bean = getObjectForBeanInstance(sharedInstance, name, beanName, mbd);
+			}
+        ......
+	return (T) bean;
+}
+```
+- `放入三级缓存方法`
+```java
+// 放入三级缓存方法
+protected void addSingletonFactory(String beanName, ObjectFactory<?> singletonFactory) {
+	Assert.notNull(singletonFactory, "Singleton factory must not be null");
+	synchronized (this.singletonObjects) {
+		if (!this.singletonObjects.containsKey(beanName)) {
+			this.singletonFactories.put(beanName, singletonFactory);
+			this.earlySingletonObjects.remove(beanName);
+			this.registeredSingletons.add(beanName);
+		}
+	}
+}
+```
+
+- 从缓存获取bean方法，也是放入二级缓存的方法
+```java
+protected Object getSingleton(String beanName, boolean allowEarlyReference) {
+	// 从一级缓存获取bean
+	Object singletonObject = this.singletonObjects.get(beanName);
+	if (singletonObject == null && isSingletonCurrentlyInCreation(beanName)) {
+		synchronized (this.singletonObjects) {
+			// 如果一级缓存没获取到，但是允许循环依赖，则从二级缓存获取bean
+			singletonObject = this.earlySingletonObjects.get(beanName);
+			if (singletonObject == null && allowEarlyReference) {
+                // 如果有循环依赖的话，此时被依赖的对象应该在三级缓存中
+				// 如果二级缓存没获取到对应bean，则从三级缓存获取
+				ObjectFactory<?> singletonFactory = this.singletonFactories.get(beanName);
+				if (singletonFactory != null) {
+					// 三级缓存获取到bean
+					singletonObject = singletonFactory.getObject();
+					// 放入到二级缓存
+					this.earlySingletonObjects.put(beanName, singletonObject);
+					// 从三级缓存移除
+					this.singletonFactories.remove(beanName);
+				}
+			}
+		}
+	}
+	return singletonObject;
+}
+```
+
+- 放入一级缓存的方法
+```java
+// doGetBean调用该方法
+public Object getSingleton(String beanName, ObjectFactory<?> singletonFactory) {
+  	Assert.notNull(beanName, "Bean name must not be null");
+  	synchronized (this.singletonObjects) {
+  			if (newSingleton) {
+                  // 放入一级缓存
+  				addSingleton(beanName, singletonObject);
+  			}
+  		}
+  		return singletonObject;
+  	}
+}
+// 放入一级缓存
+protected void addSingleton(String beanName, Object singletonObject) {
+  	synchronized (this.singletonObjects) {
+  		this.singletonObjects.put(beanName, singletonObject);
+  		this.singletonFactories.remove(beanName);
+  		this.earlySingletonObjects.remove(beanName);
+  		this.registeredSingletons.add(beanName);
+  	}
+  }
+```
+### 流程总结
+#### 无循环依赖单例对象
+- getBean -> 获取缓存为空 -> 创建bean(doCreateBean) -> 先放入三级缓存 -> 属性赋值 -> 初始化完毕 -> 放入一级缓存 -> 返回bean对象
+#### 循环依赖单例对象 A & B
+- A对象 -> 获取缓存为空 -> 创建A(doCreateBean) ->先放入三级缓存A -> 属性赋值,依赖B -> B走getBean流程，走到属性赋值，需要依赖A -> 通过getBean获取A ，从三级缓存获取到A，并将A放入二级缓存 -> B完成自己的实例化
+-> B放入一级缓存 -> A属性赋值完毕,将A放入一级缓存 -> A和B都在一级缓存中
+#### 三级缓存作用
+- 为了代理对象的延迟实例化，符合spring设计原则，Spring结合AOP跟Bean的生命周期，是在Bean创建完全之后通过在initializeBean中触发监听AnnotationAwareAspectJAutoProxyCreator的postProcessAfterInitialization方法，完成对bean对象的后处理，返回被代理对象
+- 不要三级缓存也可以，直接先创建代理对象扔到二级缓存中，也可以生效的
+#### 二级缓存作用
+- 为了和一级缓存含义上区分开，一级缓存：完全初始化的bean，二级缓存：初始化未赋值的bean。不要二级缓存也可以，在一级缓存中通过标识区分是已经赋值/未赋值，但是结构不清晰。
